@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Price History | Binance BBO Stream</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <!-- Add chartjs-plugin-zoom for zooming functionality -->
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@2.3.1/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.2.0/dist/chartjs-adapter-luxon.min.js"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        .history-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .control-panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #282c34;
+            border-radius: 5px;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            min-width: 200px;
+        }
+        
+        .control-group label {
+            margin-bottom: 5px;
+            color: #aaa;
+        }
+        
+        .control-group select,
+        .control-group input {
+            padding: 8px;
+            background-color: #3a3f4b;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #eee;
+        }
+        
+        button {
+            padding: 8px 16px;
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            align-self: flex-end;
+        }
+        
+        button:hover {
+            background-color: #0052a3;
+        }
+        
+        .chart-container {
+            width: 100%;
+            height: 400px;
+            background-color: #282c34;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            padding: 20px;
+            position: relative;
+        }
+        
+        .latency-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            flex: 1;
+            min-width: 200px;
+            background-color: #282c34;
+            border-radius: 5px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .stat-card h3 {
+            margin-bottom: 10px;
+            color: #aaa;
+            font-size: 16px;
+        }
+        
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .data-table {
+            width: 100%;
+            background-color: #282c34;
+            border-radius: 5px;
+            padding: 20px;
+            overflow-x: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        table th {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid #555;
+            color: #aaa;
+        }
+        
+        table td {
+            padding: 10px;
+            border-bottom: 1px solid #444;
+            color: #eee;
+        }
+        
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100px;
+        }
+        
+        .loading::after {
+            content: "Loading...";
+            color: #aaa;
+        }
+        
+        /* Nav Link */
+        .nav-link {
+            display: inline-block;
+            margin: 10px 0;
+            color: #0066cc;
+            text-decoration: none;
+        }
+        
+        .zoom-instructions {
+            position: relative;
+            margin-bottom: 10px;
+        }
+        
+        .zoom-info-icon {
+            color: #aaa;
+            cursor: pointer;
+        }
+        
+        .zoom-tooltip {
+            display: none;
+            position: absolute;
+            left: 24px;
+            top: 0;
+            background-color: rgba(40, 44, 52, 0.9);
+            color: #aaa;
+            font-size: 0.85rem;
+            padding: 5px 10px;
+            border-radius: 4px;
+            white-space: nowrap;
+            z-index: 100;
+        }
+        
+        .zoom-info-icon:hover + .zoom-tooltip {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <span class="crypto-logo"><span class="btc">₿</span> &lt;&gt; <span class="usdt">₮</span></span>
+                Binance BBO Stream
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/history">History</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/api/docs">API Docs</a>
+                    </li>
+                    <li class="nav-item d-flex align-items-center ms-3">
+                        <div class="connection-status-navbar">
+                            <span id="status-icon" class="status-badge"></span>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="history-container">
+        <div class="control-panel">
+            <div class="control-group">
+                <label for="symbol-select">Symbol</label>
+                <select id="symbol-select">
+                    <option value="BTCUSDT">BTCUSDT</option>
+                    <!-- Will be populated dynamically -->
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="time-range">Time Range</label>
+                <select id="time-range">
+                    <option value="1m" selected>Last 1 Minute</option>
+                    <option value="5m">Last 5 Minutes</option>
+                    <option value="15m">Last 15 Minutes</option>
+                    <option value="1h">Last 1 Hour</option>
+                    <option value="6h">Last 6 Hours</option>
+                    <option value="24h">Last 24 Hours</option>
+                    <option value="custom">Custom Range</option>
+                </select>
+            </div>
+            
+            <div class="control-group" id="custom-time-group" style="display: none;">
+                <label for="start-time">Start Time</label>
+                <input type="datetime-local" id="start-time">
+            </div>
+            
+            <div class="control-group" id="custom-time-end-group" style="display: none;">
+                <label for="end-time">End Time</label>
+                <input type="datetime-local" id="end-time">
+            </div>
+            <button id="load-data-btn">Load Data</button>
+        </div>
+        
+        <div class="chart-container">
+            <div class="zoom-instructions">
+                <span class="zoom-info-icon"><i class="bi bi-info-circle"></i></span>
+                <span class="zoom-tooltip">Click and drag horizontally to zoom on a specific time range</span>
+            </div>
+            <canvas id="price-chart"></canvas>
+            <button id="reset-zoom-btn" style="position: absolute; top: 10px; right: 10px; z-index: 10; font-size: 0.85rem; padding: 5px 10px; background-color: rgba(0, 102, 204, 0.8); display: none;">Reset Zoom</button>
+        </div>
+        
+        <div class="latency-stats">
+            <div class="stat-card">
+                <h3>Average Latency</h3>
+                <div class="value" id="avg-latency">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Minimum Latency</h3>
+                <div class="value" id="min-latency">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Maximum Latency</h3>
+                <div class="value" id="max-latency">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Median (P50)</h3>
+                <div class="value" id="p50-latency">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>95th Percentile</h3>
+                <div class="value" id="p95-latency">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Sample Count</h3>
+                <div class="value" id="sample-count">-</div>
+            </div>
+        </div>
+        
+        <div class="data-table">
+            <h2>Recent Updates</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Bid Price</th>
+                        <th>Bid Qty</th>
+                        <th>Ask Price</th>
+                        <th>Ask Qty</th>
+                        <th>Latency (ms)</th>
+                    </tr>
+                </thead>
+                <tbody id="data-table-body">
+                    <!-- Will be populated dynamically -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Import our modular JavaScript -->
+    <script type="module" src="/static/js/history.js"></script>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Add this for connection status -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get socket from window.historySocket (set in history.js)
+            setTimeout(() => {
+                if (window.historySocket) {
+                    const socket = window.historySocket;
+                    const statusIcon = document.getElementById('status-icon');
+                    
+                    if (socket.connected) {
+                        statusIcon.classList.add('connected');
+                        statusIcon.classList.remove('disconnected');
+                        statusIcon.setAttribute('title', 'Connected');
+                    }
+                    
+                    // Socket event handlers
+                    socket.on('connect', () => {
+                        statusIcon.classList.add('connected');
+                        statusIcon.classList.remove('disconnected');
+                        statusIcon.setAttribute('title', 'Connected');
+                    });
+                    
+                    socket.on('disconnect', () => {
+                        statusIcon.classList.remove('connected');
+                        statusIcon.classList.add('disconnected');
+                        statusIcon.setAttribute('title', 'Disconnected');
+                    });
+                }
+            }, 1000); // Wait for historySocket to be initialized
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Socket.IO Test</title>
+</head>
+<body>
+    <h1>Socket.IO Connection Test</h1>
+    <div id="status">Status: Disconnected</div>
+    <div id="data"></div>
+
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js" integrity="sha384-Gr6Lu2Ajx28mzwyVR8CFkULdCU7kMlZ9UthllibdOSo6qAiN+yXNHqtgdTvFXMT4" crossorigin="anonymous"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const statusElement = document.getElementById('status');
+            const dataElement = document.getElementById('data');
+            
+            statusElement.textContent = 'Status: Connecting...';
+            
+            // Connect to Socket.IO server
+            const socket = io('http://localhost:5050', {
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                timeout: 10000,
+                transports: ['websocket', 'polling']
+            });
+            
+            // Connection events
+            socket.on('connect', function() {
+                statusElement.textContent = 'Status: Connected (ID: ' + socket.id + ')';
+                statusElement.style.color = 'green';
+                console.log('Connected to server');
+            });
+            
+            socket.on('connect_error', function(error) {
+                statusElement.textContent = 'Status: Connection Error - ' + error;
+                statusElement.style.color = 'red';
+                console.error('Connection error:', error);
+            });
+            
+            socket.on('disconnect', function(reason) {
+                statusElement.textContent = 'Status: Disconnected - ' + reason;
+                statusElement.style.color = 'red';
+                console.log('Disconnected:', reason);
+            });
+            
+            // Listen for BBO updates
+            socket.on('bbo_update', function(data) {
+                console.log('Received data:', data);
+                
+                // Display the data
+                const timestamp = new Date().toISOString();
+                dataElement.innerHTML = `
+                    <p><strong>${timestamp}</strong></p>
+                    <p>Symbol: ${data.symbol}</p>
+                    <p>Bid: ${data.bid_price} (${data.bid_quantity})</p>
+                    <p>Ask: ${data.ask_price} (${data.ask_quantity})</p>
+                    <p>Spread: ${data.spread}</p>
+                    <p>Latency: ${data.latency} ms</p>
+                `;
+            });
+        });
+    </script>
+</body>
+</html>

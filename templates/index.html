@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance BBO Stream</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <span class="crypto-logo"><span class="btc">₿</span> &lt;&gt; <span class="usdt">₮</span></span>
+                Binance BBO Stream
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/history">History</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/api/docs">API Docs</a>
+                    </li>
+                    <li class="nav-item d-flex align-items-center ms-3">
+                        <div class="connection-status-navbar">
+                            <span id="status-icon" class="status-badge"></span>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container my-4">
+        <!-- Current BBO Display -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-dark text-white">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h4 class="mb-0">BTC/USDT Real-time Quotes</h4>
+                            <div class="latency-indicator">
+                                <small>Backend Latency: <span id="latency-value" class="badge bg-light text-dark">-</span></small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row d-flex justify-content-center">
+                            <!-- Bid Box -->
+                            <div class="col-md-4 mb-3">
+                                <div class="bbo-box bid">
+                                    <h4>Bid Price</h4>
+                                    <div class="price-value" id="bid-price">...</div>
+                                    <div class="qty-value">Qty: <span id="bid-qty">...</span></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Spread Box -->
+                            <div class="col-md-3 mb-3">
+                                <div class="bbo-box">
+                                    <h4>Spread</h4>
+                                    <div class="spread-value"><span id="spread-value">...</span></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Ask Box -->
+                            <div class="col-md-4 mb-3">
+                                <div class="bbo-box ask">
+                                    <h4>Ask Price</h4>
+                                    <div class="price-value" id="ask-price">...</div>
+                                    <div class="qty-value">Qty: <span id="ask-qty">...</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Price History Chart -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-dark text-white">
+                        <h4 class="mb-0 text-center">Price History Chart</h4>
+                    </div>
+                    <div class="card-body">
+                        <!-- Chart Container -->
+                        <div id="chart-container" class="chart-container">
+                            <!-- Chart will be rendered here -->
+                        </div>
+                        
+                        <!-- Chart Controls -->
+                        <div class="chart-controls mt-3">
+                            <div class="btn-group">
+                                <button class="btn btn-outline-primary timespan-btn" data-minutes="1">1m</button>
+                                <button class="btn btn-outline-primary timespan-btn" data-minutes="5">5m</button>
+                                <button class="btn btn-outline-primary timespan-btn" data-minutes="15">15m</button>
+                            </div>
+                            <button id="export-csv-btn" class="btn btn-success ms-2">
+                                Export CSV
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Stats and Information -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-dark text-white">
+                        <h4 class="mb-0 text-center">Connection Stats</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="stats-item">
+                                    <div class="stats-label">Last Update:</div>
+                                    <div class="stats-value" id="last-update-time">-</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/app.js') }}" type="module"></script>
+</body>
+</html>

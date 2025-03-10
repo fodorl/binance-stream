@@ -1,0 +1,502 @@
+/* Binance BBO Stream CSS */
+:root {
+    --primary-color: #f0b90b;
+    --secondary-color: #1e2026;
+    --bid-color: #28a745;
+    --ask-color: #dc3545;
+    --chart-bid-color: rgba(40, 167, 69, 1);
+    --chart-ask-color: rgba(220, 53, 69, 1);
+}
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    padding-top: 70px;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+}
+
+/* Connection Status */
+.connection-status {
+    padding: 5px 10px;
+    border-radius: 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 10px;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+}
+
+.connection-status i {
+    margin-right: 8px;
+}
+
+.connection-status.bg-success {
+    background: linear-gradient(135deg, #2ecc71, #27ae60) !important;
+}
+
+.connection-status.bg-danger {
+    background: linear-gradient(135deg, #e74c3c, #c0392b) !important;
+}
+
+.connection-status-text {
+    font-weight: 600;
+    margin-right: 5px;
+}
+
+/* Connection Status in Navbar */
+.connection-status-navbar {
+    display: flex;
+    align-items: center;
+}
+
+.status-badge {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #f39c12; /* Amber for connecting */
+    transition: background-color 0.3s ease;
+    cursor: help;
+    box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
+}
+
+.status-badge.connected {
+    background-color: #2ecc71; /* Green for connected */
+    box-shadow: 0 0 5px rgba(46, 204, 113, 0.7);
+}
+
+.status-badge.disconnected {
+    background-color: #e74c3c; /* Red for disconnected */
+    box-shadow: 0 0 5px rgba(231, 76, 60, 0.7);
+}
+
+/* Transport indicator */
+.transport-websocket {
+    color: #2ecc71;
+    font-weight: bold;
+}
+
+.transport-polling {
+    color: #f39c12;
+    font-weight: bold;
+}
+
+/* BBO Display */
+.bbo-box {
+    text-align: center;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    background-color: white;
+    flex: 1;
+    margin: 0 5px;
+    transition: transform 0.2s;
+}
+
+.bbo-box:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.bbo-box h4 {
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+    color: #666;
+}
+
+.bbo-box.bid h4 {
+    color: var(--bid-color);
+}
+
+.bbo-box.ask h4 {
+    color: var(--ask-color);
+}
+
+.price-value {
+    font-size: 2rem;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+    margin-bottom: 5px;
+}
+
+.bid .price-value {
+    color: var(--bid-color);
+}
+
+.ask .price-value {
+    color: var(--ask-color);
+}
+
+.qty-value {
+    font-size: 1rem;
+    color: #666;
+    font-family: 'Courier New', monospace;
+}
+
+.spread-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #444;
+    font-family: 'Courier New', monospace;
+}
+
+/* Stats Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+}
+
+.stats-box {
+    background-color: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    text-align: center;
+}
+
+.stats-label {
+    font-size: 0.9rem;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.stats-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.stats-value.up {
+    color: var(--bid-color);
+}
+
+.stats-value.down {
+    color: var(--ask-color);
+}
+
+/* Animation for price changes */
+@keyframes flashGreen {
+    0% { background-color: transparent; }
+    50% { background-color: rgba(40, 167, 69, 0.2); }
+    100% { background-color: transparent; }
+}
+
+@keyframes flashRed {
+    0% { background-color: transparent; }
+    50% { background-color: rgba(220, 53, 69, 0.2); }
+    100% { background-color: transparent; }
+}
+
+.price-increase {
+    animation: flashGreen 1s ease;
+}
+
+.price-decrease {
+    animation: flashRed 1s ease;
+}
+
+/* Chart Container */
+.chart-container {
+    width: 100%;
+    height: 300px;
+    margin-bottom: 15px;
+    position: relative;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    box-shadow: inset 0 0 5px rgba(0,0,0,0.1);
+    padding: 10px;
+}
+
+/* Chart canvas */
+#price-chart-canvas {
+    max-width: 100%;
+    height: 100%;
+}
+
+/* Chart controls */
+.chart-controls {
+    display: flex;
+    justify-content: center;
+    margin-top: 15px;
+}
+
+/* Timespan button styles */
+.timespan-btn {
+    font-size: 0.85rem;
+    min-width: 40px;
+    padding: 0.375rem 0.5rem;
+    cursor: pointer;
+    position: relative;
+}
+
+.timespan-btn.active {
+    background-color: #0d6efd;
+    color: white;
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+}
+
+.timespan-btn:hover:not(.active) {
+    background-color: #e9ecef;
+    color: #0d6efd;
+}
+
+/* Add a pulse effect to the active button */
+.timespan-btn.active::after {
+    content: '';
+    position: absolute;
+    border: 3px solid #0d6efd;
+    border-radius: 4px;
+    opacity: 0;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    animation: pulse 1.5s ease-out;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
+    70% {
+        transform: scale(1.1);
+        opacity: 0.3;
+    }
+    100% {
+        transform: scale(1.3);
+        opacity: 0;
+    }
+}
+
+/* Export CSV button */
+#export-csv-btn {
+    margin-left: 10px;
+    font-weight: 500;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}
+
+#export-csv-btn:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+}
+
+/* Debug styles */
+.log-container {
+    height: 150px;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    padding: 10px;
+    border: 1px solid #dee2e6;
+    font-family: monospace;
+    font-size: 12px;
+    color: #333;
+}
+
+.log-container .error {
+    color: #dc3545;
+}
+
+.log-container .info {
+    color: #0d6efd;
+}
+
+.log-container .success {
+    color: #198754;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .bbo-box {
+        margin-bottom: 10px;
+    }
+    
+    .price-value {
+        font-size: 1.5rem;
+    }
+    
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .chart-container {
+        height: 250px;
+    }
+    
+    /* Adjust timespan buttons for mobile */
+    .btn-group {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .timespan-btn {
+        font-size: 0.75rem;
+        min-width: 35px;
+        margin-bottom: 5px;
+    }
+}
+
+/* Navbar */
+.navbar {
+    background-color: var(--secondary-color);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1030;
+}
+
+.navbar-brand {
+    font-weight: 700;
+    color: var(--primary-color) !important;
+}
+
+.crypto-logo {
+    font-size: 1.2rem;
+    margin-right: 8px;
+}
+
+.btc {
+    color: var(--primary-color);
+}
+
+.usdt {
+    color: #26a17b;
+}
+
+/* Card headers */
+.card-header.bg-dark {
+    background-color: var(--secondary-color) !important;
+    border-bottom: none;
+}
+
+/* Latency indicator */
+.latency-indicator {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.latency-indicator .badge {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+}
+
+/* Connection Status in Navbar */
+.connection-status-navbar {
+    display: flex;
+    align-items: center;
+}
+
+/* Crypto Logo */
+.crypto-logo {
+    display: inline-block;
+    font-weight: bold;
+    font-size: 1.4rem;
+    color: #F0B90B;  /* Binance yellow color */
+    background-color: #181A20;  /* Binance dark color */
+    padding: 3px 10px;
+    border-radius: 6px;
+    margin-right: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    vertical-align: middle;
+    letter-spacing: 1px;
+}
+
+.crypto-logo .btc, .crypto-logo .usdt {
+    font-size: 1.6rem;
+}
+
+/* Bitcoin Symbol Styling */
+.bitcoin-symbol {
+    font-size: 1.6rem;
+    font-weight: bold;
+    color: #f7931a;
+    background: -webkit-linear-gradient(#f7931a, #d4850e);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-right: 8px;
+    text-shadow: 0px 0px 3px rgba(247, 147, 26, 0.2);
+    display: inline-block;
+    vertical-align: middle;
+}
+
+/* Ticker Display */
+.ticker-display {
+    padding: 20px;
+}
+
+/* Card */
+.card {
+    border: none;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+    margin-bottom: 20px;
+}
+
+.card-header {
+    background-color: #fff;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    font-weight: 600;
+}
+
+/* Table */
+.table th {
+    font-weight: 600;
+    color: #495057;
+}
+
+/* Add styles for header and navigation links */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background-color: #1e222d;
+    border-bottom: 1px solid #333;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #fff;
+}
+
+.nav-links {
+    display: flex;
+    gap: 15px;
+}
+
+.history-link {
+    color: #0066cc;
+    text-decoration: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.history-link:hover {
+    background-color: rgba(0, 102, 204, 0.1);
+    text-decoration: underline;
+}
+
+/* Container adjustment for fixed navbar */
+.container {
+    padding-top: 15px;
+}
+
+/* Adjust api-docs-container top margin to work with fixed navbar */
+.api-docs-container {
+    margin-top: 15px;
+}
+
+/* History Page */
+.history-container {
+    padding: 20px;
+    margin-top: 15px;
+}

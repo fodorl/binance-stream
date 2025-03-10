@@ -1,0 +1,557 @@
+#!/usr/bin/env python3
+"""
+Web server module for the Binance BBO stream application.
+Provides a web interface for displaying real-time BBO data.
+"""
+import logging
+import json
+import os
+import sys
+from flask import Flask, render_template, make_response, Response
+from flask_socketio import SocketIO
+import eventlet
+import eventlet.queue as queue
+import ssl
+import time
+import threading
+from utils import current_time_ms
+import random
+
+# Monkey patch standard library for eventlet if not done already
+eventlet.monkey_patch()
+
+logger = logging.getLogger(__name__)
+
+class WebServer:
+    def __init__(self, host="0.0.0.0", port=5000, debug=False):
+        self.host = host
+        self.port = port
+        self.debug = debug
+        print("Setting up Server...")
+        self.app = Flask(__name__, static_folder='static', template_folder='templates')
+        
+        # CORS headers 
+        @self.app.after_request
+        def add_cors_headers(response):
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+            response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            return response
+        
+        # Initialize Socket.IO with correct settings
+        self.socketio = SocketIO(
+            self.app, 
+            cors_allowed_origins="*",
+            logger=True, 
+            engineio_logger=False,  # Set to False to reduce log spam
+            async_mode='eventlet',
+            always_connect=True,
+            path='/socket.io/',
+            max_http_buffer_size=1e7,
+            ping_timeout=60,  # Reduced to 1 minute
+            ping_interval=10,  # 10 second ping interval
+            # Ensure WebSocket transport is available but don't force it
+            # Allow both websocket and polling for compatibility
+            # Transport upgrade is enabled by default
+        )
+        self.latest_data = {}
+        self.message_queue = queue.Queue()
+        self.is_running = False
+        self.connected_clients = set()  # Track connected clients
+        self.client_lock = threading.Lock()  # Lock for thread safety
+        
+        # Throttling control
+        self.last_message_time = 0
+        self.throttle_interval = 100  # 100 milliseconds between messages
+        self.throttled_message = None  # Store the latest message when throttling
+        
+        # Setup routes
+        @self.app.route("/")
+        def index():
+            return self.index()
+            
+        @self.app.route("/api/docs")
+        def api_docs():
+            return self.api_docs()
+        
+        # Setup SocketIO events
+        @self.socketio.on('connect')
+        def handle_connect():
+            client_id = self._get_client_id()
+            logger.info(f"Client connected: {client_id}")
+            with self.client_lock:
+                self.connected_clients.add(client_id)
+            self.on_connect()
+            
+        @self.socketio.on('disconnect')
+        def handle_disconnect():
+            client_id = self._get_client_id()
+            logger.info(f"Client disconnected: {client_id}")
+            with self.client_lock:
+                if client_id in self.connected_clients:
+                    self.connected_clients.remove(client_id)
+            
+        @self.socketio.on('ready')
+        def handle_ready():
+            client_id = self._get_client_id()
+            logger.info(f"Client sent ready event: {client_id}")
+            self.on_connect()  # Treat ready the same as connect
+            
+        @self.socketio.on('ping')
+        def handle_ping():
+            client_id = self._get_client_id()
+            logger.debug(f"Received ping from client: {client_id}")
+            self.socketio.emit('pong', {'time': int(time.time() * 1000)}, room=client_id)
+            
+        @self.socketio.on('request_initial_data')
+        def handle_request_initial_data():
+            self.on_request_initial_data()
+        
+        # Setup background thread for processing messages
+        self.thread = None
+    
+    def _get_client_id(self):
+        """Get current client ID if available"""
+        try:
+            from flask_socketio import request
+            if hasattr(request, 'sid'):
+                return request.sid
+        except (ImportError, RuntimeError):
+            pass
+        return "unknown"
+    
+    def index(self):
+        """Serve the index page"""
+        return render_template('index.html')
+    
+    def api_docs(self):
+        """Serve the API documentation page"""
+        try:
+            return render_template('api_docs.html')
+        except Exception as e:
+            logger.error(f"Error rendering API docs: {str(e)}")
+            return str(e), 500
+    
+    def on_connect(self):
+        """Handle client connection"""
+        client_id = self._get_client_id()
+        logger.info(f"Processing connection for client: {client_id}")
+        
+        # Send welcome message to confirm connection
+        try:
+            self.socketio.emit('welcome', {'message': 'Welcome to Binance BBO Stream'}, room=client_id)
+            logger.info(f"Welcome message sent to client: {client_id}")
+            
+            # Poke the connection with another message to ensure stability
+            self.socketio.emit('connection_status', {'status': 'connected', 'timestamp': int(time.time() * 1000)}, room=client_id)
+        
+            # Send the latest data if available
+            if self.latest_data:
+                logger.info(f"Sending latest data to newly connected client: {client_id}")
+                self.socketio.emit('bbo_update', self.latest_data, room=client_id)
+                
+        except Exception as e:
+            logger.error(f"Error in on_connect: {e}")
+    
+    def on_request_initial_data(self):
+        """Handle client request for initial data"""
+        client_id = self._get_client_id()
+        logger.info(f"Client {client_id} requested initial data")
+        
+        try:
+            # Send the latest data if available
+            if self.latest_data:
+                logger.info(f"Sending latest data to client {client_id}")
+                self.socketio.emit('bbo_update', self.latest_data, room=client_id)
+            else:
+                logger.warning(f"No data available to send to client {client_id}")
+                self.socketio.emit('status', {'message': 'Waiting for data from Binance...'}, room=client_id)
+        except Exception as e:
+            logger.error(f"Error in on_request_initial_data: {e}")
+    
+    def broadcast_message(self, data):
+        """Add message to queue for broadcast to all clients"""
+        try:
+            # Detect growing queue issues early
+            queue_size = self.message_queue.qsize()
+            if queue_size > 50:  # Lower threshold for warning
+                logger.warning(f"Message queue is growing rapidly: size={queue_size}")
+
+            # Add to message queue
+            self.message_queue.put(data)
+            logger.debug(f"Message added to queue, current size: {queue_size}")
+        except Exception as e:
+            logger.error(f"Error queuing message: {e}")
+    
+    def _process_message_queue(self):
+        """Background worker to process and emit messages"""
+        logger.info("Starting message processing thread")
+        batch_size = 5  # Process messages in small batches for efficiency
+        
+        while self.is_running:
+            try:
+                # Process messages in batches when available
+                messages_to_process = []
+                process_time = current_time_ms()
+                
+                # Try to get a batch of messages quickly
+                try:
+                    # Get at least one message (blocking with timeout)
+                    message = self.message_queue.get(timeout=0.5)
+                    messages_to_process.append(message)
+                    
+                    # Get more messages if available (non-blocking)
+                    for _ in range(batch_size - 1):
+                        try:
+                            message = self.message_queue.get_nowait()
+                            messages_to_process.append(message)
+                        except queue.Empty:
+                            break
+                except queue.Empty:
+                    # No messages available, continue loop
+                    continue
+                
+                # Log if we're processing a batch
+                if len(messages_to_process) > 1:
+                    logger.debug(f"Processing batch of {len(messages_to_process)} messages")
+                
+                # Keep track of throttling
+                current_time = current_time_ms()
+                time_since_last_message = current_time - self.last_message_time
+                
+                # Process each message in the batch
+                for message in messages_to_process:
+                    # Format the data for the client
+                    if isinstance(message, tuple) and len(message) == 2:
+                        event_type, data = message
+                        # This is likely from the process_bbo_update method
+                        if event_type == 'bbo_update' and isinstance(data, dict):
+                            # Already formatted, just emit it
+                            formatted_data = data
+                            logger.info(f"Emitting pre-formatted bbo_update data: {formatted_data}")
+                            
+                            # Update latest data
+                            self.latest_data = formatted_data
+                            
+                            # Send directly via socketio
+                            logger.info(f"Emitting event '{event_type}' to all [/]")
+                            self.socketio.emit(event_type, formatted_data)
+                            
+                            # Mark as processed
+                            for i in range(len(messages_to_process)):
+                                self.message_queue.task_done()
+                            
+                            # Skip the rest of the loop
+                            continue
+                    elif isinstance(message, dict):
+                        if 'bid_price' in message and 'ask_price' in message:
+                            # This is from our MessageProcessor
+                            backendLatency = None
+                            
+                            # Use the already calculated latency from MessageProcessor if available
+                            if message.get('latency') is not None:
+                                backendLatency = message.get('latency')
+                                logger.debug(f"Using pre-calculated latency: {backendLatency}ms")
+                            
+                            # Otherwise calculate from exchange_time
+                            elif message.get('exchange_time') is not None:
+                                exchange_time = int(message.get('exchange_time'))
+                                received_time = message.get('received_timestamp', process_time)
+                                
+                                # Prefer using the original received timestamp
+                                calculated_latency = received_time - exchange_time
+                                
+                                # Only use reasonable latency values (less than 10 seconds)
+                                if calculated_latency < 10000:  # 10 seconds max
+                                    backendLatency = calculated_latency
+                                    logger.debug(f"Calculated latency: {backendLatency}ms (exchange_time: {exchange_time}, received_time: {received_time})")
+                                else:
+                                    logger.warning(f"Latency too high: {calculated_latency}ms - ignoring")
+                            
+                            formatted_data = {
+                                'symbol': message.get('symbol', 'UNKNOWN'),
+                                'bidPrice': str(message.get('bid_price', '0.00')),
+                                'bidQty': str(message.get('bid_qty', '0.0000')),
+                                'askPrice': str(message.get('ask_price', '0.00')),
+                                'askQty': str(message.get('ask_qty', '0.0000')),
+                                'timestamp': message.get('exchange_time', process_time),
+                                'serverTimestamp': process_time,
+                                'backendLatency': backendLatency
+                            }
+                            
+                            # Log detailed latency info for debugging
+                            logger.info(f"Backend latency: {backendLatency}ms | exchange_time: {message.get('exchange_time')}, " +
+                                       f"received_time: {message.get('received_timestamp')}, process_time: {process_time}")
+                        else:
+                            # This is raw Binance format
+                            backendLatency = None
+                            if message.get('E') is not None:
+                                exchange_time = int(message.get('E'))
+                                received_time = message.get('received_timestamp', process_time)
+                                
+                                # Prefer using the original received timestamp
+                                calculated_latency = received_time - exchange_time
+                                
+                                # Only use reasonable latency values (less than 10 seconds)
+                                if calculated_latency < 10000:  # 10 seconds max
+                                    backendLatency = calculated_latency
+                                    logger.debug(f"Calculated latency: {backendLatency}ms (exchange_time: {exchange_time}, received_time: {received_time})")
+                                else:
+                                    logger.warning(f"Latency too high: {calculated_latency}ms - ignoring")
+                            
+                            formatted_data = {
+                                'symbol': message.get('s', 'UNKNOWN'),  # Symbol
+                                'bidPrice': message.get('b', '0.00'),   # Best bid price
+                                'bidQty': message.get('B', '0.0000'),   # Best bid qty
+                                'askPrice': message.get('a', '0.00'),   # Best ask price
+                                'askQty': message.get('A', '0.0000'),   # Best ask qty
+                                'timestamp': message.get('E', process_time),  # Event time
+                                'serverTimestamp': process_time,
+                                'backendLatency': backendLatency
+                            }
+                            
+                            # Log detailed latency info for debugging
+                            logger.info(f"Backend latency: {backendLatency}ms | exchange_time: {message.get('E')}, " +
+                                       f"received_time: {message.get('received_timestamp')}, process_time: {process_time}")
+                    
+                        # Ensure timestamp is never null
+                        if formatted_data['timestamp'] is None:
+                            formatted_data['timestamp'] = process_time
+                        
+                        # Update latest data
+                        self.latest_data = formatted_data
+                        
+                        # Apply throttling: Only send if enough time has passed since last message
+                        if time_since_last_message >= self.throttle_interval:
+                            # Time to send a message - use the current one
+                            # Reset the throttle timer
+                            self.last_message_time = current_time
+                            
+                            # Send to all clients
+                            with self.client_lock:
+                                client_count = len(self.connected_clients)
+                                clients = list(self.connected_clients)  # Make a copy to avoid mutation during iteration
+                            
+                            # Add detailed debug information
+                            queue_size = self.message_queue.qsize()
+                            if queue_size > 10:  # Only log when queue is getting large
+                                logger.warning(f"Current message queue size: {queue_size}")
+                            
+                            logger.debug(f"Broadcasting BBO update to {client_count} clients")
+                            
+                            # Use a separate namespace broadcast instead of individual messages
+                            self.socketio.emit('bbo_update', formatted_data, namespace='/')
+                            
+                            # Log detailed data for debugging occasionally
+                            if random.random() < 0.01:  # Only log 1% of messages to avoid spam
+                                logger.info(f"Sample bbo_update data: {json.dumps(formatted_data)}")
+                            
+                            # Clear any throttled message since we just sent one
+                            self.throttled_message = None
+                        else:
+                            # Not enough time has passed, store this message as the latest throttled message
+                            self.throttled_message = formatted_data
+                            logger.debug(f"Throttling message, time since last: {time_since_last_message}ms")
+                            
+                        # Update the time variables for the next message
+                        current_time = current_time_ms()
+                        time_since_last_message = current_time - self.last_message_time
+                    else:
+                        logger.error(f"Invalid data format for broadcast: {type(message)}")
+                
+                # After processing the batch, check if we have a throttled message
+                # and it's been long enough to send it
+                if self.throttled_message is not None:
+                    current_time = current_time_ms()
+                    time_since_last_message = current_time - self.last_message_time
+                    
+                    if time_since_last_message >= self.throttle_interval:
+                        # Send the throttled message
+                        self.last_message_time = current_time
+                        
+                        with self.client_lock:
+                            client_count = len(self.connected_clients)
+                        
+                        logger.debug(f"Sending throttled message to {client_count} clients")
+                        self.socketio.emit('bbo_update', self.throttled_message, namespace='/')
+                        self.throttled_message = None
+                    
+            except Exception as e:
+                logger.error(f"Error in message processing thread: {e}")
+                
+        logger.info("Message processing thread stopped")
+    
+    def start(self):
+        """Start the web server"""
+        if self.is_running:
+            logger.warning("Server is already running")
+            return
+            
+        self.is_running = True
+        
+        # Start message processing thread
+        def run_message_thread():
+            self._process_message_queue()
+            
+        self.thread = eventlet.spawn(run_message_thread)
+        
+        # Start the server
+        logger.info(f"Starting server on {self.host}:{self.port}")
+        try:
+            # Use SSL if certificates are available
+            cert_path = 'certs/cert.pem'
+            key_path = 'certs/key.pem'
+            
+            if os.path.exists(cert_path) and os.path.exists(key_path):
+                logger.info("Starting with SSL (HTTPS mode)")
+                # For eventlet-based server, we need to pass the cert and key file paths
+                self.socketio.run(self.app, host=self.host, port=self.port, debug=self.debug, 
+                                  use_reloader=False, keyfile=key_path, certfile=cert_path)
+            else:
+                logger.info("Starting without SSL (HTTP mode)")
+                self.socketio.run(self.app, host=self.host, port=self.port, debug=self.debug, 
+                               use_reloader=False)
+        except Exception as e:
+            logger.error(f"Error starting server: {e}")
+            self.is_running = False
+            if self.thread:
+                self.thread.kill()
+                self.thread = None
+    
+    def run(self):
+        """Run the web server - compatibility with older code"""
+        self.start()
+    
+    def _ensure_certs_directory(self, cert_path, key_path):
+        """Ensure certificates directory exists"""
+        cert_dir = os.path.dirname(cert_path)
+        key_dir = os.path.dirname(key_path)
+        
+        try:
+            os.makedirs(cert_dir, exist_ok=True)
+            os.makedirs(key_dir, exist_ok=True)
+            return True
+        except Exception as e:
+            logger.error(f"Error creating certificate directories: {e}")
+            return False
+
+    def _create_ssl_certs(self, ssl_cert, ssl_key):
+        """Generate self-signed SSL certificates"""
+        logger.warning("SSL certificates not found. Creating self-signed certificates...")
+        
+        # Ensure directories exist
+        if not self._ensure_certs_directory(ssl_cert, ssl_key):
+            logger.error("Failed to create certificate directories")
+            return False
+            
+        try:
+            # Generate self-signed certificates if they don't exist
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            import datetime
+
+            # Generate a private key
+            key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+            )
+
+            # Generate a self-signed certificate
+            subject = issuer = x509.Name([
+                x509.NameAttribute(NameOID.COMMON_NAME, u"localhost"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Binance BBO Stream"),
+            ])
+            cert = x509.CertificateBuilder().subject_name(
+                subject
+            ).issuer_name(
+                issuer
+            ).public_key(
+                key.public_key()
+            ).serial_number(
+                x509.random_serial_number()
+            ).not_valid_before(
+                datetime.datetime.utcnow()
+            ).not_valid_after(
+                # Valid for 365 days
+                datetime.datetime.utcnow() + datetime.timedelta(days=365)
+            ).add_extension(
+                x509.SubjectAlternativeName([x509.DNSName(u"localhost")]),
+                critical=False,
+            ).sign(key, hashes.SHA256())
+
+            # Write the certificate and key to files
+            with open(ssl_cert, "wb") as f:
+                f.write(cert.public_bytes(serialization.Encoding.PEM))
+            with open(ssl_key, "wb") as f:
+                f.write(key.private_key_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                ))
+            logger.info(f"Created self-signed certificates at {ssl_cert} and {ssl_key}")
+            return True
+        except Exception as e:
+            logger.error(f"Error creating self-signed certificates: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
+    def stop(self):
+        """Stop the web server"""
+        self.is_running = False
+        if self.thread:
+            self.thread.kill()
+        logger.info("Web server stopped")
+    
+    def process_bbo_update(self, message):
+        """Process BBO update from Binance WebSocket."""
+        try:
+            # Get the message data
+            data = json.loads(message)
+            logger.info(f"Processing BBO update: {data}")
+            
+            # Ignore anything except for BBO updates
+            if 'e' in data and data['e'] != 'bookTicker':
+                logger.info(f"Ignoring non-bookTicker message: {data}")
+                return
+            
+            # Extract the relevant fields
+            symbol = data.get('s')
+            bid_price = data.get('b')
+            bid_qty = data.get('B')
+            ask_price = data.get('a')
+            ask_qty = data.get('A')
+            
+            # Server-side timestamps
+            received_time = time.time() * 1000
+            
+            # Exchange timestamp (if available)
+            exchange_time = data.get('E', received_time)
+            
+            # Format the data
+            update_data = {
+                'symbol': symbol,
+                'bidPrice': bid_price,
+                'bidQty': bid_qty,
+                'askPrice': ask_price,
+                'askQty': ask_qty,
+                'timestamp': exchange_time,
+                'serverTimestamp': received_time,
+                'backendLatency': received_time - exchange_time
+            }
+            
+            # Store the latest data
+            self.latest_data = update_data
+            
+            # Put the update in the message queue
+            self.message_queue.put(('bbo_update', update_data))
+            
+            # Log backend latency
+            logger.info(f"Backend latency: {received_time - exchange_time}ms | exchange_time: {exchange_time}, received_time: {received_time}, process_time: {time.time() * 1000}")
+            
+        except Exception as e:
+            logger.error(f"Error processing BBO update: {e}")
+            import traceback
+            logger.error(traceback.format_exc())

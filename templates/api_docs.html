@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Documentation | Binance BBO Stream</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            background-color: #f5f5f5;
+            color: #333;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .api-docs-container {
+            margin-top: 30px;
+            margin-bottom: 50px;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1, h2, h3, h4 {
+            color: #131722;
+        }
+        
+        h1 {
+            font-weight: 700;
+            margin-bottom: 30px;
+        }
+        
+        h2 {
+            font-weight: 600;
+            margin-top: 40px;
+            margin-bottom: 20px;
+        }
+        
+        h3 {
+            font-weight: 500;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        
+        pre {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        code {
+            font-family: 'Courier New', Courier, monospace;
+            color: #d63384;
+        }
+        
+        pre code {
+            color: #333;
+        }
+        
+        table {
+            margin: 20px 0;
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        table thead th {
+            background-color: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            padding: 10px;
+            text-align: left;
+        }
+        
+        table tbody td {
+            border-bottom: 1px solid #dee2e6;
+            padding: 10px;
+        }
+        
+        .btn-primary {
+            background-color: #0d6efd;
+            border-color: #0d6efd;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0a58ca;
+            border-color: #0a53be;
+        }
+        
+        .btn-outline-light {
+            color: #f8f9fa;
+            border-color: #f8f9fa;
+        }
+        
+        .btn-outline-light:hover {
+            color: #212529;
+            background-color: #f8f9fa;
+            border-color: #f8f9fa;
+        }
+        
+        .footer {
+            background-color: #131722;
+            color: #f8f9fa;
+            padding: 20px 0;
+            margin-top: 50px;
+        }
+        
+        .github-link {
+            color: #f8f9fa;
+            text-decoration: none;
+        }
+        
+        .github-link:hover {
+            color: #0d6efd;
+        }
+        
+        .connection-status-navbar {
+            display: flex;
+            align-items: center;
+        }
+        
+        .status-badge {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #ccc;
+            display: inline-block;
+        }
+        
+        .status-badge.connected {
+            background-color: #2ecc71;
+        }
+        
+        .status-badge.disconnected {
+            background-color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <span class="crypto-logo"><span class="btc">₿</span> &lt;&gt; <span class="usdt">₮</span></span>
+                Binance BBO Stream
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/history">History</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/api/docs">API Docs</a>
+                    </li>
+                    <li class="nav-item d-flex align-items-center ms-3">
+                        <div class="connection-status-navbar">
+                            <span id="status-icon" class="status-badge"></span>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-md-10 offset-md-1 api-docs-container">
+                <h1>Binance BBO Stream API Documentation</h1>
+                
+                <h2>Introduction</h2>
+                <p>The Binance BBO (Best Bid and Offer) Stream provides real-time market data from the Binance cryptocurrency exchange. This API delivers WebSocket-based access to the best bid and ask prices for trading pairs.</p>
+                
+                <h2>WebSocket API</h2>
+                <p>The WebSocket API uses Socket.IO to deliver real-time updates. Connect to the WebSocket endpoint to receive continuous price updates.</p>
+                
+                <h3>Connection Details</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Property</th>
+                            <th>Value</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>URL</td>
+                            <td><code>https://your-server-address:5000</code></td>
+                            <td>Replace with your actual server address</td>
+                        </tr>
+                        <tr>
+                            <td>Protocol</td>
+                            <td>Socket.IO (v4)</td>
+                            <td>Uses Socket.IO library version 4.5.4 or compatible</td>
+                        </tr>
+                        <tr>
+                            <td>Transport</td>
+                            <td>WebSocket with polling fallback</td>
+                            <td>Uses HTTP long-polling as a fallback if WebSocket is unavailable</td>
+                        </tr>
+                        <tr>
+                            <td>Authentication</td>
+                            <td>None</td>
+                            <td>Public access; no authentication required</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3>Event Types</h3>
+                <p>The WebSocket API emits the following events:</p>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Event Name</th>
+                            <th>Description</th>
+                            <th>Payload Example</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>welcome</code></td>
+                            <td>Emitted when client connects</td>
+                            <td><code>{ message: "Welcome to Binance BBO Stream" }</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>connection_status</code></td>
+                            <td>Connection status updates</td>
+                            <td><code>{ connected: true, reconnecting: false }</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>bbo_update</code></td>
+                            <td>Real-time BBO updates</td>
+                            <td><code>{ symbol: "BTCUSDT", bidPrice: "28750.00", ... }</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>error</code></td>
+                            <td>Error notifications</td>
+                            <td><code>{ code: 1001, message: "Connection error" }</code></td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3>BBO Update Payload Structure</h3>
+                <pre><code>{
+  "symbol": "BTCUSDT",          // Trading pair symbol
+  "bidPrice": "28750.00",       // Best bid price
+  "bidQty": "1.2345",           // Best bid quantity
+  "askPrice": "28755.00",       // Best ask price
+  "askQty": "0.9876",           // Best ask quantity
+  "timestamp": 1646392800000    // Timestamp in milliseconds
+}</code></pre>
+
+                <h3>Connection Example (JavaScript)</h3>
+                <pre><code>// Using Socket.IO v4.5.4 client library
+const socket = io('http://your-server-address:5000', {
+    path: '/socket.io',
+    transports: ['polling', 'websocket']
+});
+
+// Listen for connection events
+socket.on('connect', () => {
+    console.log('Connected to WebSocket');
+});
+
+// Handle BBO updates
+socket.on('bbo_update', (data) => {
+    console.log(`BBO Update for ${data.symbol}: Bid ${data.bidPrice} (${data.bidQty}), Ask ${data.askPrice} (${data.askQty})`);
+    
+    // Example: Update UI with latest prices
+    document.getElementById('current-price').textContent = data.bidPrice;
+    
+    // Example: Add to price history array for chart
+    priceHistory.push({
+        time: new Date(data.timestamp),
+        price: parseFloat(data.bidPrice)
+    });
+    
+    // Update chart with new data
+    updateChart(priceHistory);
+});
+
+// Handle errors
+socket.on('error', (error) => {
+    console.error('WebSocket error:', error);
+});
+
+// Handle disconnections
+socket.on('disconnect', (reason) => {
+    console.log('Disconnected from WebSocket. Reason:', reason);
+});</code></pre>
+
+                <h3>Error Handling</h3>
+                <p>The WebSocket API may emit error events in the following scenarios:</p>
+                <ul>
+                    <li>Connection failures</li>
+                    <li>Authentication errors (if authentication is required)</li>
+                    <li>Internal server errors</li>
+                    <li>Invalid message format</li>
+                </ul>
+                
+                <p>Always implement proper error handling in your client application:</p>
+                <pre><code>// Error handling for Socket.IO
+socket.on('connect_error', (error) => {
+    console.error('Connection error:', error);
+    // Implement retry logic or user notification
+});
+
+socket.on('error', (errorData) => {
+    console.error('Server error:', errorData);
+    // Handle specific error cases
+});
+
+// Handle reconnection attempts
+let reconnectAttempts = 0;
+socket.on('reconnect_attempt', (attemptNumber) => {
+    reconnectAttempts = attemptNumber;
+    console.log(`Reconnection attempt ${attemptNumber}`);
+});</code></pre>
+                
+                <h3>Best Practices</h3>
+                <ol>
+                    <li><strong>Implement reconnection handling</strong> - Socket.IO has built-in reconnection, but you should handle reconnection events in your UI</li>
+                    <li><strong>Use data validation</strong> - Always validate the data received from the server before processing</li>
+                    <li><strong>Handle rate limits</strong> - If implementing multiple connections, be aware of rate limits</li>
+                    <li><strong>Consider latency</strong> - WebSocket data might have some latency; implement appropriate UI feedback</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <footer class="footer text-center">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-12">
+                    <p>Binance BBO Stream - Real-time WebSocket API for Binance market data</p>
+                    <p><a href="https://github.com/example/binance-bbo-stream" class="github-link" target="_blank">GitHub Repository</a></p>
+                </div>
+            </div>
+        </div>
+    </footer>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <script>
+        // Socket.IO connection
+        const socket = io();
+        const statusIcon = document.getElementById('status-icon');
+        
+        // Socket event handlers
+        socket.on('connect', () => {
+            statusIcon.classList.add('connected');
+            statusIcon.classList.remove('disconnected');
+            statusIcon.setAttribute('title', 'Connected');
+        });
+        
+        socket.on('disconnect', () => {
+            statusIcon.classList.remove('connected');
+            statusIcon.classList.add('disconnected');
+            statusIcon.setAttribute('title', 'Disconnected');
+        });
+    </script>
+</body>
+</html>

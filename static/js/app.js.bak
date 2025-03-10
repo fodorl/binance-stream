@@ -1,0 +1,658 @@
+// Socket.IO client for BBO stream
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, initializing Socket.IO connection...');      
+    
+    // Check if Socket.IO library is loaded
+    if (typeof io === 'undefined') {
+        console.error('Socket.IO library is not loaded!');
+        
+        // Add a simple retry mechanism to reload the script
+        const scriptElement = document.createElement('script');
+        scriptElement.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js';
+        scriptElement.onload = function() {
+            // Reload the page after a short delay
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        };
+        scriptElement.onerror = function() {
+        };
+        
+        document.head.appendChild(scriptElement);
+        return;
+    }
+
+    // Initialize connection status as connecting
+    updateConnectionStatus('connecting');
+    
+    // Get the hostname - handle both cases with and without ports
+    const host = window.location.hostname;
+    // Determine the port - use current port if available, or default to 5000
+    const port = window.location.port || '5000';
+    
+    // Create the connection URL dynamically based on current page location
+    // Don't explicitly add the port if we're using the default HTTP/HTTPS ports
+    let socketUrl;
+    if ((window.location.protocol === 'https:' && port === '443') || 
+        (window.location.protocol === 'http:' && port === '80')) {
+        socketUrl = window.location.protocol + '//' + host;
+    } else {
+        socketUrl = window.location.protocol + '//' + host + ':' + port;
+    }
+      
+    // Connect to the Socket.IO server with explicit version
+    const socket = io(socketUrl, {
+        reconnection: true,
+        reconnectionAttempts: 20,  // Increase attempts
+        reconnectionDelay: 2000,   // Increase delay between attempts
+        timeout: 30000,            // Increase timeout to 30 seconds
+        transports: ['polling', 'websocket'],  // Use both transports
+        forceNew: true,
+        autoConnect: true,
+        withCredentials: false,
+        path: '/socket.io/',
+        upgrade: true
+    });
+    
+    
+    // Add a connected flag to track state
+    let isConnected = false;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 10;
+    
+    // Keep track of last update time to detect disconnections
+    let lastUpdateTime = Date.now();
+    
+    let prevBidPrice = null;
+    let prevAskPrice = null;
+
+    // Data for the chart
+    const maxDataPoints = 100;
+    const chartData = {
+        timestamps: [],
+        bidPrices: [],
+        askPrices: []
+    };
+
+    // Current timespan in minutes
+    let currentTimespan = 5;
+
+    // DOM elements
+    const symbolElement = document.getElementById('symbol');
+    const bidPriceElement = document.getElementById('bid-price');
+    const bidQtyElement = document.getElementById('bid-quantity'); 
+    const askPriceElement = document.getElementById('ask-price');
+    const askQtyElement = document.getElementById('ask-quantity'); 
+    const spreadElement = document.getElementById('spread');
+    const backendLatencyElement = document.getElementById('backend-latency');
+    const uiLatencyElement = document.getElementById('ui-latency');
+    const lastUpdateElement = document.getElementById('last-update');
+    const exchangeTimeElement = document.getElementById('exchange-time');
+    const connectionStatusElement = document.getElementById('connection-status');
+
+    // Create chart
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: [
+                {
+                    label: 'Bid Price',
+                    data: [],
+                    borderColor: 'rgba(40, 167, 69, 1)',
+                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.1
+                },
+                {
+                    label: 'Ask Price',
+                    data: [],
+                    borderColor: 'rgba(220, 53, 69, 1)',
+                    backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+                duration: 0 // Disable animation for better performance
+            },
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'minute',
+                        displayFormats: {
+                            minute: 'HH:mm:ss'
+                        },
+                        tooltipFormat: 'HH:mm:ss.SSS'
+                    },
+                    ticks: {
+                        source: 'auto',
+                        maxTicksLimit: 8,
+                        maxRotation: 0
+                    }
+                },
+                y: {
+                    ticks: {
+                        callback: function(value) {
+                            return parseFloat(value).toFixed(2);
+                        }
+                    }
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Price History (${currentTimespan}m)`,
+                    font: {
+                        size: 16
+                    },
+                    padding: {
+                        top: 10,
+                        bottom: 20
+                    }
+                },
+                legend: {
+                    position: 'top',
+                },
+                tooltip: {
+                    callbacks: {
+                        title: function(tooltipItems) {
+                            const item = tooltipItems[0];
+                            if (!item) return '';
+                            
+                            const timestamp = item.parsed.x;
+                            const date = new Date(timestamp);
+                            return date.toLocaleTimeString();
+                        },
+                        label: function(context) {
+                            if (context.dataset.label === 'Bid Price') {
+                                return 'Bid: $' + parseFloat(context.parsed.y).toFixed(2);
+                            } else {
+                                return 'Ask: $' + parseFloat(context.parsed.y).toFixed(2);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Update connection status visual indicator
+    function updateConnectionStatus(status) {
+        isConnected = status === 'connected';
+
+        if (status === 'connected') {
+            connectionStatusElement.textContent = 'Connected';
+            connectionStatusElement.classList.remove('text-danger', 'text-warning');
+            connectionStatusElement.classList.add('text-success');
+            reconnectAttempts = 0;
+        } else if (status === 'connecting') {
+            connectionStatusElement.textContent = 'Connecting...';
+            connectionStatusElement.classList.remove('text-success', 'text-danger');
+            connectionStatusElement.classList.add('text-warning');
+        } else {
+            connectionStatusElement.textContent = 'Disconnected';
+            connectionStatusElement.classList.remove('text-success', 'text-warning');
+            connectionStatusElement.classList.add('text-danger');
+        }
+        
+    }
+
+    // Websocket connection status events
+    socket.on('connect', function() {
+        isConnected = true;
+        reconnectAttempts = 0;
+        updateConnectionStatus('connected');
+        
+        // Let the server know we're ready
+        socket.emit('ready');
+        
+        // Request initial data
+        socket.emit('request_initial_data');
+        
+        // Monitor engine socket state
+        if (socket.io && socket.io.engine) {
+            socket.io.engine.on('upgrade', function(transport) {
+            });
+        }
+    });
+    
+    // Add event for welcome message
+    socket.on('welcome', function(data) {
+    });
+    
+    // Disconnect event
+    socket.on('disconnect', function(reason) {
+        isConnected = false;
+        updateConnectionStatus('disconnected');
+        
+        // If disconnect wasn't initiated by the client, attempt to reconnect
+        if (reason !== 'io client disconnect') {
+        }
+    });
+    
+    // Reconnecting event
+    socket.on('reconnecting', function(attemptNumber) {
+        reconnectAttempts = attemptNumber;
+        updateConnectionStatus('reconnecting');
+    });
+    
+    // Reconnect success
+    socket.on('reconnect', function() {
+        updateConnectionStatus('connected');
+    });
+    
+    // Reconnect error
+    socket.on('reconnect_error', function(error) {
+        updateConnectionStatus('error');
+    });
+    
+    // Error event
+    socket.on('error', function(error) {
+        updateConnectionStatus('error');
+    });
+    
+    // Connection error event
+    socket.on('connect_error', function(error) {
+        updateConnectionStatus('error');
+             
+        // Try a different transport after a few failures
+        if (reconnectAttempts > 3) {
+            socket.io.opts.transports = ['polling']; // Force polling only
+        }
+    });
+    
+    // BBO Update event
+    socket.on('bbo_update', function(data) {
+        // Debug logging to see the data coming from the server
+        console.log('Received data:', {
+            timestamp: data.timestamp,
+            serverTimestamp: data.serverTimestamp,
+            backendLatency: data.backendLatency,
+            clientTime: Date.now()
+        });
+        updateBBO(data);
+    });
+    
+    // Listen for any event (debugging)
+    const originalOnevent = socket.onevent;
+    socket.onevent = function(packet) {
+        const args = packet.data || [];
+        if (args[0] !== 'bbo_update') {  // Don't log bbo_update events as they are too frequent
+        }
+        originalOnevent.call(this, packet);
+    };
+    
+    // Set up a periodic check to verify connection is alive
+    setInterval(function() {
+        const timeSinceLastUpdate = Date.now() - lastUpdateTime;
+        if (isConnected && timeSinceLastUpdate > 60000) { // No updates for 60 seconds
+            updateConnectionStatus('stale');
+            
+            // Force reconnection
+            if (reconnectAttempts < maxReconnectAttempts) {
+                socket.disconnect().connect();
+            }
+        }
+    }, 30000); // Check every 30 seconds
+    
+    // Ping server periodically to keep connection alive
+    setInterval(function() {
+        if (socket.connected) {
+            socket.emit('ping');
+        }
+    }, 20000); // Every 20 seconds
+    
+    // Update BBO data on the page
+    function updateBBO(data) {
+        if (!data) {
+            return;
+        }
+        
+        console.log('Processing BBO update with data:', data);
+        
+        // Calculate UI latency (client time - server receive time)
+        const serverTime = data.timestamp ? parseInt(data.timestamp) : Date.now();
+        const serverReceiveTime = data.serverTimestamp ? parseInt(data.serverTimestamp) : Date.now();
+        const clientTime = Date.now();
+        
+        // Update the last update time for stale connection detection
+        lastUpdateTime = clientTime;
+        
+        // UI latency is the time between server sending message and client processing it
+        const uiLatency = clientTime - serverReceiveTime;
+        
+        // Backend latency is the time between Binance sending message and our server receiving it
+        let backendLatency = null;
+        if (data.backendLatency !== null && data.backendLatency !== undefined) {
+            // Ensure we're working with a number
+            backendLatency = parseInt(data.backendLatency, 10) || null;
+        }
+        
+        console.log('Calculated latencies:', {
+            serverTime,
+            serverReceiveTime,
+            clientTime,
+            uiLatency,
+            backendLatency,
+            rawBackendLatency: data.backendLatency
+        });
+        
+        // Total latency (Binance to browser)
+        const totalLatency = backendLatency !== null ? backendLatency + uiLatency : null;
+        
+        // Update BBO display
+        const bidPrice = parseFloat(data.bidPrice).toFixed(2);
+        const askPrice = parseFloat(data.askPrice).toFixed(2);
+        const bidQty = parseFloat(data.bidQty).toFixed(4);
+        const askQty = parseFloat(data.askQty).toFixed(4);
+        
+        // Highlight changes
+        if (prevBidPrice !== null && bidPrice !== prevBidPrice) {
+            flashElement('#bid-price', bidPrice > prevBidPrice ? 'flash-green' : 'flash-red');
+        }
+        
+        if (prevAskPrice !== null && askPrice !== prevAskPrice) {
+            flashElement('#ask-price', askPrice > prevAskPrice ? 'flash-green' : 'flash-red');
+        }
+        
+        // Update the UI elements
+        if (symbolElement) symbolElement.textContent = data.symbol || 'UNKNOWN';
+        if (bidPriceElement) bidPriceElement.textContent = bidPrice;
+        if (bidQtyElement) bidQtyElement.textContent = bidQty;
+        if (askPriceElement) askPriceElement.textContent = askPrice;
+        if (askQtyElement) askQtyElement.textContent = askQty;
+        
+        // Update spread
+        const spread = (parseFloat(askPrice) - parseFloat(bidPrice)).toFixed(2);
+        if (spreadElement) spreadElement.textContent = spread;
+        
+        // Update timestamps
+        const updateTime = new Date().toLocaleTimeString();
+        if (lastUpdateElement) lastUpdateElement.textContent = updateTime;
+        if (exchangeTimeElement) exchangeTimeElement.textContent = new Date(serverTime).toLocaleTimeString();
+        
+        // Format backend latency display with color coding
+        let backendLatencyText = backendLatency !== null ? `Backend: ${backendLatency} ms` : 'Backend: N/A';
+        let backendLatencyClass = '';
+        
+        if (backendLatency === null) {
+            backendLatencyClass = 'text-secondary'; // Gray for unknown latency
+        } else if (backendLatency < 100) {
+            backendLatencyClass = 'text-success'; // Green for good latency
+        } else if (backendLatency < 500) {
+            backendLatencyClass = 'text-warning'; // Yellow for moderate latency
+        } else {
+            backendLatencyClass = 'text-danger'; // Red for high latency
+        }
+        
+        // Format UI latency display with color coding
+        let uiLatencyText = `UI: ${uiLatency} ms`;
+        let uiLatencyClass = '';
+        
+        if (uiLatency < 100) {
+            uiLatencyClass = 'text-success'; // Green for good latency
+        } else if (uiLatency < 300) {
+            uiLatencyClass = 'text-warning'; // Yellow for moderate latency
+        } else {
+            uiLatencyClass = 'text-danger'; // Red for high latency
+        }
+        
+        if (backendLatencyElement) {
+            backendLatencyElement.textContent = backendLatencyText;
+            backendLatencyElement.className = ''; // Remove badge and background class
+            backendLatencyElement.classList.add(backendLatencyClass);
+        }
+        
+        if (uiLatencyElement) {
+            uiLatencyElement.textContent = uiLatencyText;
+            uiLatencyElement.className = ''; // Remove badge and background class
+            uiLatencyElement.classList.add(uiLatencyClass);
+        }
+        
+        // Store for next comparison
+        prevBidPrice = bidPrice;
+        prevAskPrice = askPrice;
+        
+        // Add to price chart
+        addDataPoint(serverTime, data.bidPrice, data.askPrice);
+    }
+
+    // Helper function to update connection status display
+    function updateConnectionStatus(status) {
+        const element = document.getElementById('connection-status');
+        
+        if (!element) {
+            console.error('connection-status element not found');
+            return;
+        }
+        
+        // Remove existing classes
+        element.classList.remove('text-success', 'text-danger', 'text-warning');
+        
+        // Set status text and class
+        switch (status) {
+            case 'connected':
+                element.textContent = 'Connected';
+                element.classList.add('text-success');
+                break;
+            case 'disconnected':
+                element.textContent = 'Disconnected';
+                element.classList.add('text-danger');
+                break;
+            case 'reconnecting':
+                element.textContent = `Reconnecting (${reconnectAttempts})...`;
+                element.classList.add('text-warning');
+                break;
+            case 'connecting':
+                element.textContent = 'Connecting...';
+                element.classList.add('text-warning');
+                break;
+            case 'stale':
+                element.textContent = 'Connection stale - no updates';
+                element.classList.add('text-warning');
+                break;
+            case 'error':
+                element.textContent = 'Connection error';
+                element.classList.add('text-danger');
+                break;
+            default:
+                element.textContent = status;
+                element.classList.add('text-warning');
+        }
+    }
+    
+    // Helper function for price change animation
+    function flashElement(selector, className) {
+        const element = document.querySelector(selector);
+        if (!element) return;
+        
+        element.classList.add(className);
+        setTimeout(() => {
+            element.classList.remove(className);
+        }, 500);
+    }
+
+    // Add data to chart
+    function addDataPoint(timestamp, bidPrice, askPrice) {
+        console.log(`Adding data point: time=${timestamp}, bid=${bidPrice}, ask=${askPrice}`);
+        
+        // Ensure timestamp is a proper Date object
+        const dataTimestamp = typeof timestamp === 'number' ? timestamp : Date.now();
+        
+        // Store the data point
+        chartData.timestamps.push(dataTimestamp);
+        chartData.bidPrices.push(bidPrice);
+        chartData.askPrices.push(askPrice);
+
+        // Remove data points outside the current timespan
+        const now = Date.now();
+        const cutoffTime = now - (currentTimespan * 60 * 1000);
+        
+        while (chartData.timestamps.length > 0 && chartData.timestamps[0] < cutoffTime) {
+            chartData.timestamps.shift();
+            chartData.bidPrices.shift();
+            chartData.askPrices.shift();
+        }
+
+        console.log(`Chart data points: ${chartData.timestamps.length}`);
+
+        // Limit total data points to prevent memory issues
+        if (chartData.timestamps.length > maxDataPoints) {
+            const excessPoints = chartData.timestamps.length - maxDataPoints;
+            chartData.timestamps.splice(0, excessPoints);
+            chartData.bidPrices.splice(0, excessPoints);
+            chartData.askPrices.splice(0, excessPoints);
+        }
+
+        console.log(`Chart data points: ${chartData.timestamps.length}`);
+
+        // Update the chart
+        updateChart();
+    }
+
+    // Update chart with current data
+    function updateChart() {
+        // Filter the data based on the selected timespan
+        const now = Date.now();
+        const cutoffTime = now - (currentTimespan * 60 * 1000);
+        
+        // Filter data points that are within the selected timespan
+        const filteredIndices = chartData.timestamps.map((time, index) => ({time, index}))
+            .filter(item => item.time >= cutoffTime)
+            .map(item => item.index);
+        
+        // Get data for the selected timespan
+        const filteredTimestamps = filteredIndices.map(i => chartData.timestamps[i]);
+        const filteredBidPrices = filteredIndices.map(i => chartData.bidPrices[i]);
+        const filteredAskPrices = filteredIndices.map(i => chartData.askPrices[i]);
+
+        // Create data point objects for Chart.js time scale
+        const bidDataPoints = filteredTimestamps.map((time, i) => ({
+            x: time,
+            y: filteredBidPrices[i]
+        }));
+        
+        const askDataPoints = filteredTimestamps.map((time, i) => ({
+            x: time,
+            y: filteredAskPrices[i]
+        }));
+
+        // Format data for chart
+        chart.data.datasets[0].data = bidDataPoints;
+        chart.data.datasets[1].data = askDataPoints;
+
+        // Adjust Y axis to create some margin around the min/max values
+        if (filteredBidPrices.length > 0 && filteredAskPrices.length > 0) {
+            const allPrices = [...filteredBidPrices, ...filteredAskPrices];
+            const minPrice = Math.min(...allPrices);
+            const maxPrice = Math.max(...allPrices);
+            const range = maxPrice - minPrice;
+            const padding = range * 0.1; // 10% padding
+
+            if (range > 0) {
+                chart.options.scales.y.min = minPrice - padding;
+                chart.options.scales.y.max = maxPrice + padding;
+            }
+        }
+
+        // Update the X axis timespan
+        if (filteredTimestamps.length > 0) {
+            // Calculate min and max time explicitly rather than relying on auto-scaling
+            const minTime = Math.min(...filteredTimestamps);
+            const maxTime = Math.max(...filteredTimestamps);
+            
+            // Add small padding to make sure all points are visible
+            const timeRange = maxTime - minTime;
+            const timePadding = timeRange * 0.05; // 5% padding
+            
+            chart.options.scales.x.min = minTime - timePadding;
+            chart.options.scales.x.max = maxTime + timePadding;
+        }
+        
+        // Update chart title to show current timespan
+        chart.options.plugins.title.text = `Price History (${currentTimespan}m)`;
+
+        // Update the chart
+        chart.update();
+        console.log(`Chart updated with timespan: ${currentTimespan}m, points: ${filteredBidPrices.length}`);
+    }
+
+    // Time period buttons
+    document.querySelectorAll('.timespan-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const minutes = parseInt(this.dataset.minutes);
+            if (minutes !== currentTimespan) {
+                // Store the previous timespan for reference
+                const previousTimespan = currentTimespan;
+                currentTimespan = minutes;
+
+                // Update active button state
+                document.querySelectorAll('.timespan-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+
+                // If changing to a shorter timespan, we might need to remove older points
+                // If changing to a longer timespan, we'll keep all points and they'll be filtered in updateChart
+                if (minutes < previousTimespan) {
+                    const now = Date.now();
+                    const cutoffTime = now - (currentTimespan * 60 * 1000);
+                    
+                    // Remove data points outside the new timespan
+                    while (chartData.timestamps.length > 0 && chartData.timestamps[0] < cutoffTime) {
+                        chartData.timestamps.shift();
+                        chartData.bidPrices.shift();
+                        chartData.askPrices.shift();
+                    }
+                }
+
+                // Refresh chart with new timespan
+                updateChart();
+                console.log(`Changed timespan to ${minutes}m, data points: ${chartData.timestamps.length}`);
+            }
+        });
+    });
+
+    // Animation for price changes
+    function animatePriceChange(element, type) {
+        // Remove existing animation classes
+        element.classList.remove('price-increase', 'price-decrease');
+
+        // Add the new animation class
+        element.classList.add(type === 'increase' ? 'price-increase' : 'price-decrease');
+
+        // Remove the class after animation completes
+        setTimeout(() => {
+            element.classList.remove('price-increase', 'price-decrease');
+        }, 1000);
+    }
+
+    // Periodically check connection health
+    setInterval(() => {
+        const now = Date.now();
+        const timeSinceLastUpdate = now - lastUpdateTime;
+
+        // If we haven't received updates for 10 seconds and we think we're connected
+        if (isConnected && lastUpdateTime > 0 && timeSinceLastUpdate > 10000) {
+            console.warn('No updates received for 10 seconds, connection may be stale');
+            // Try to reconnect
+            socket.disconnect().connect();
+        }
+    }, 5000);
+
+    // Set initial active timespan button
+    document.querySelector(`.timespan-btn[data-minutes="${currentTimespan}"]`).classList.add('active');
+});
